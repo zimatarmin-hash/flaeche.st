@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Flächenmessung Südtirol</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          ink:   { DEFAULT: '#101715', 900: '#0c1210' },
+          pine:  { DEFAULT: '#4c8a71', 600: '#3a6d59', 700: '#274b3f' },
+          rust:  { DEFAULT: '#b1543a', 600: '#95432c' },
+          mist:  '#e9efe9',
+        },
+        fontFamily: {
+          display: ['"Rajdhani"', 'sans-serif'],
+          body: ['"IBM Plex Sans"', 'sans-serif'],
+          mono: ['"IBM Plex Mono"', 'monospace'],
+        },
+      }
+    }
+  }
+</script>
+
+<style>
+  :root { color-scheme: dark; }
+  html, body { height: 100%; overscroll-behavior: none; }
+  body {
+    margin: 0;
+    font-family: 'IBM Plex Sans', sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+  #map { position: fixed; inset: 0; background: #1a2420; }
+  .leaflet-control-attribution { display: none; }
+
+  /* ---- Reticle ---- */
+  #reticle {
+    position: fixed; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 64px; height: 64px;
+    pointer-events: none; z-index: 500;
+    filter: drop-shadow(0 1px 2px rgba(0,0,0,.55));
+  }
+  #reticle .arm { position: absolute; background: rgba(233,239,233,.92); }
+  #reticle .arm.h { top: 50%; left: 8px; right: 8px; height: 1.5px; transform: translateY(-50%); }
+  #reticle .arm.v { left: 50%; top: 8px; bottom: 8px; width: 1.5px; transform: translateX(-50%); }
+  #reticle .ring { position: absolute; inset: 22px; border: 1.5px solid rgba(233,239,233,.92); border-radius: 50%; }
+  #reticle .dot { position: absolute; inset: 0; margin: auto; width: 4px; height: 4px; background: #4c8a71; border-radius: 50%; box-shadow: 0 0 0 3px rgba(76,138,113,.35); }
+
+  /* ---- Glass chrome ---- */
+  .glass {
+    background: rgba(16, 23, 21, 0.82);
+    backdrop-filter: blur(14px) saturate(140%);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    border-color: rgba(233,239,233,0.08);
+  }
+
+  .pt-safe { padding-top: env(safe-area-inset-top, 0px); }
+  .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
+
+  .dock-btn { -webkit-user-select: none; user-select: none; }
+  .dock-btn:active { transform: scale(0.94); }
+  .dock-btn[disabled] { opacity: .38; pointer-events: none; }
+  .dock-btn, #layer-toggle button { transition: transform .12s ease, background-color .15s ease, opacity .15s ease; }
+
+  .seg-active { background: #4c8a71 !important; color: #0c1210 !important; }
+
+  #result-card, #parcel-card { transition: transform .3s cubic-bezier(.2,.9,.3,1.1), opacity .3s ease; }
+  #toast { transition: transform .25s ease, opacity .25s ease; }
+
+  /* ---- Kataster switch ---- */
+  .switch-track {
+    width: 40px; height: 24px; border-radius: 9999px; position: relative;
+    background: rgba(233,239,233,.18); flex-shrink: 0; border: none; padding: 0;
+    transition: background-color .2s ease;
+  }
+  .switch-track[aria-checked="true"] { background: #4c8a71; }
+  .switch-thumb {
+    position: absolute; top: 2px; left: 2px; width: 20px; height: 20px;
+    border-radius: 50%; background: #e9efe9; box-shadow: 0 1px 3px rgba(0,0,0,.4);
+    transition: transform .2s ease;
+  }
+  .switch-track[aria-checked="true"] .switch-thumb { transform: translateX(16px); }
+
+  /* ---- Verschiebbare Messpunkte ----
+     Wichtig: der Scale-Effekt darf NICHT auf .pt-marker selbst (das äußere,
+     von Leaflet über inline transform: translate3d() positionierte Element)
+     gesetzt werden - eine Klassen-Regel würde dort nie sichtbar, weil Inline-
+     Styles Vorrang haben. Daher greift der Effekt am inneren <div>. */
+  .pt-marker {
+    cursor: grab; touch-action: none;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .pt-marker > div { transition: transform .12s ease, filter .12s ease; }
+  .pt-marker.pt-dragging { cursor: grabbing; }
+  .pt-marker.pt-dragging > div {
+    transform: scale(1.35);
+    filter: drop-shadow(0 3px 8px rgba(0,0,0,.5));
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .dock-btn, #result-card, #toast, .dock-btn:active, .switch-thumb, .pt-marker > div, #parcel-card { transition: none !important; transform: none !important; }
+  }
+
+  /* ---- Standort-Tooltip (Genauigkeit) ---- */
+  .leaflet-tooltip.locate-tooltip {
+    background: rgba(16, 23, 21, 0.85);
+    color: #e9efe9;
+    border: 1px solid rgba(233,239,233,0.15);
+    font: 600 11px 'IBM Plex Mono', monospace;
+    padding: 2px 7px;
+    border-radius: 6px;
+    box-shadow: 0 2px 6px rgba(0,0,0,.35);
+  }
+  .leaflet-tooltip.locate-tooltip::before { display: none; }
+
+  ::selection { background: rgba(76,138,113,.4); }
+  button:focus-visible, [tabindex]:focus-visible { outline: 2px solid #4c8a71; outline-offset: 2px; }
+</style>
+</head>
+<body class="text-mist font-body">
+
+<div id="map"></div>
+
+<!-- Reticle -->
+<div id="reticle">
+  <div class="ring"></div>
+  <div class="arm h"></div>
+  <div class="arm v"></div>
+  <div class="dot"></div>
+</div>
+
+<!-- Top bar -->
+<div id="topbar" class="fixed top-0 left-0 right-0 z-[600] pt-safe">
+  <div class="flex items-center justify-between gap-3 px-4 pt-3 pb-2">
+    <div class="glass border rounded-full px-4 py-2 flex items-baseline gap-2 shadow-lg shadow-black/30">
+      <span class="font-display font-bold text-lg leading-none tracking-wide">FLÄCHE<span class="text-pine">.</span>ST</span>
+    </div>
+    <div class="flex flex-col items-end gap-2">
+      <div id="layer-toggle" class="glass border rounded-full p-1 flex shadow-lg shadow-black/30 font-display text-sm font-semibold tracking-wide">
+        <button type="button" data-layer="ortho" class="seg-active px-3 py-1.5 rounded-full">Luftbild</button>
+        <button type="button" data-layer="osm" class="px-3 py-1.5 rounded-full text-mist/70">Karte</button>
+      </div>
+      <div class="glass border rounded-2xl px-3 py-1 flex flex-col divide-y divide-mist/10 shadow-lg shadow-black/30">
+        <div class="flex items-center justify-between gap-3 py-1.5">
+          <span class="font-display text-xs font-semibold tracking-wide text-mist/85">Kataster</span>
+          <button id="kataster-switch" type="button" role="switch" aria-checked="false" class="switch-track" aria-label="Kataster mit Parzellennummern einblenden">
+            <span class="switch-thumb"></span>
+          </button>
+        </div>
+        <div class="flex items-center justify-between gap-3 py-1.5">
+          <span class="font-display text-xs font-semibold tracking-wide text-mist/85">Standort</span>
+          <button id="locate-switch" type="button" role="switch" aria-checked="false" class="switch-track" aria-label="Standortermittlung einblenden">
+            <span class="switch-thumb"></span>
+          </button>
+        </div>
+        <div class="flex items-center justify-between gap-3 py-1.5">
+          <span class="font-display text-xs font-semibold tracking-wide text-mist/85">Katasterinfo</span>
+          <button id="info-switch" type="button" role="switch" aria-checked="false" class="switch-track" aria-label="Parzellen antippen, um Informationen anzuzeigen">
+            <span class="switch-thumb"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="attrib" class="px-5 text-[10px] text-mist/45 font-body"></div>
+</div>
+
+<!-- Parzellen-Info-Fenster: sitzt über dem Bedienfeld, die Karte zoomt beim
+     Auswählen einer Parzelle so, dass diese oberhalb dieses Fensters passt. -->
+<div id="parcel-card" class="fixed left-3 right-3 z-[600] opacity-0 translate-y-4 pointer-events-none">
+  <div class="glass border rounded-2xl px-5 py-4 shadow-xl shadow-black/40 relative">
+    <button id="parcel-close" type="button" class="absolute top-3 right-3 w-6 h-6 flex items-center justify-center text-mist/50 hover:text-mist" aria-label="Schließen">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+    <div class="text-[11px] uppercase tracking-[0.14em] text-mist/55 font-body font-medium">Parzelle</div>
+    <div id="parcel-number" class="font-mono font-semibold text-2xl leading-none mt-1"></div>
+    <dl class="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-sm font-body">
+      <dt class="text-mist/50">Katastralgemeinde</dt><dd id="parcel-kg"></dd>
+      <dt class="text-mist/50">Fläche</dt><dd id="parcel-area" class="font-mono tabular-nums"></dd>
+      <dt class="text-mist/50">Umfang</dt><dd id="parcel-perimeter" class="font-mono tabular-nums"></dd>
+    </dl>
+    <div class="text-xs text-mist/45 font-body mt-3 pt-3 border-t border-mist/10">
+      Besitzerdaten sind über den öffentlichen Kataster-Dienst nicht verfügbar (Datenschutz – nur im Grundbuchamt einsehbar).
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="fixed left-1/2 top-20 -translate-x-1/2 z-[700] opacity-0 pointer-events-none translate-y-[-8px]">
+  <div class="glass border rounded-full px-4 py-2 text-sm font-body shadow-lg shadow-black/30 whitespace-nowrap"></div>
+</div>
+
+<!-- Result card -->
+<div id="result-card" class="fixed left-3 right-3 z-[600] opacity-0 translate-y-4 pointer-events-none" style="bottom: 132px;">
+  <div class="glass border rounded-2xl px-5 py-4 shadow-xl shadow-black/40">
+    <div class="text-[11px] uppercase tracking-[0.14em] text-mist/55 font-body font-medium">Berechnete Fläche</div>
+    <div class="flex items-end justify-between mt-1">
+      <div id="area-main" class="font-mono font-semibold text-3xl tabular-nums leading-none"></div>
+      <div id="area-sub" class="font-mono text-sm text-mist/60 tabular-nums leading-none pb-0.5"></div>
+    </div>
+    <div id="area-meta" class="text-xs text-mist/50 font-body mt-2"></div>
+  </div>
+</div>
+
+<!-- Bottom instrument dock -->
+<div id="dock" class="fixed bottom-0 left-0 right-0 z-[600] pb-safe">
+  <div class="glass border-t px-3 pt-3 pb-3 shadow-[0_-8px_24px_rgba(0,0,0,.35)]">
+    <div class="grid grid-cols-3 gap-2.5">
+      <button id="btn-point" type="button" class="dock-btn bg-pine text-ink rounded-2xl py-3.5 flex flex-col items-center justify-center gap-1 font-display font-semibold">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.1-7-11.5A7 7 0 0 1 19 9.5C19 14.9 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.4"/></svg>
+        <span class="text-[13px] leading-none tracking-wide">Punkt setzen</span>
+      </button>
+      <button id="btn-area" type="button" class="dock-btn bg-white/10 text-mist rounded-2xl py-3.5 flex flex-col items-center justify-center gap-1 font-display font-semibold" disabled>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8l6-4 6 3 6-3v13l-6 3-6-3-6 3z"/><path d="M9 4v13M15 7v13"/></svg>
+        <span class="text-[13px] leading-none tracking-wide">Fläche berechnen</span>
+      </button>
+      <button id="btn-reset" type="button" class="dock-btn bg-rust/25 text-mist rounded-2xl py-3.5 flex flex-col items-center justify-center gap-1 font-display font-semibold">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>
+        <span class="text-[13px] leading-none tracking-wide">Zurücksetzen</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ---------------------------------------------------------------
+   * Quelle: Orthofoto-Dienst der Autonomen Provinz Bozen – Südtirol.
+   * Geprüfter, aktiver Endpunkt (GetCapabilities live abgefragt).
+   * Falls die Provinz die Adresse ändert: hier anpassen.
+   * ------------------------------------------------------------- */
+  const WMS_URL   = 'https://geoservices.buergernetz.bz.it/mapproxy/p_bz-Orthoimagery/wms';
+  const WMS_LAYER = 'Aerial-2023-RGB';
+
+  /* ---------------------------------------------------------------
+   * Kataster (Parzellen + Parzellennummern), Amt für Vermessung.
+   * "WebRepresentation" ist die für Web-Karten vorgesehene, bereits
+   * fertig gestylte Zusammenstellung (Grenzen + Nummern).
+   * ------------------------------------------------------------- */
+  const CADASTRE_URL   = 'https://geoservices5.civis.bz.it/geoserver/p_bz-Cadastre/ows';
+  const CADASTRE_LAYER = 'WebRepresentation';
+  const INFO_LAYER = 'ParcelsAggregate'; // liefert die Sachdaten (Nummer, Katastralgemeinde, Fläche) per GetFeatureInfo
+
+  const LOCATE_COLOR = '#4a90c4';
+  const SELECT_COLOR = '#d9a441';
+
+  const map = L.map('map', {
+    center: [46.7, 11.43],
+    zoom: 12,
+    minZoom: 8,
+    maxZoom: 20,
+    zoomControl: false,
+    attributionControl: false,
+  });
+
+  const ortho = L.tileLayer.wms(WMS_URL, {
+    layers: WMS_LAYER,
+    format: 'image/jpeg',
+    version: '1.3.0',
+    transparent: false,
+    maxZoom: 20,
+    maxNativeZoom: 19,
+  });
+
+  const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    subdomains: 'abc',
+  });
+
+  const kataster = L.tileLayer.wms(CADASTRE_URL, {
+    layers: CADASTRE_LAYER,
+    format: 'image/png',
+    transparent: true,
+    version: '1.3.0',
+    maxZoom: 20,
+    maxNativeZoom: 19,
+    opacity: 0.9,
+  });
+  let katasterOn = false;
+  let katasterFailed = false;
+  kataster.on('tileerror', function () {
+    if (katasterFailed) return;
+    katasterFailed = true;
+    showToast('Kataster nicht erreichbar');
+    setKataster(false);
+  });
+
+  const ATTRIB = {
+    ortho: 'Orthofoto © Autonome Provinz Bozen – Südtirol',
+    osm: '© OpenStreetMap-Mitwirkende',
+    kataster: 'Kataster © Amt für Vermessung und Grundbuch – Südtirol',
+  };
+
+  let orthoFailed = false;
+  ortho.on('tileerror', function () {
+    if (orthoFailed) return;
+    orthoFailed = true;
+    showToast('Luftbild nicht erreichbar – wechsle zu Karte');
+    setLayer('osm');
+  });
+
+  /* ---------------- Layer switch ---------------- */
+  const layerToggle = document.getElementById('layer-toggle');
+  L.DomEvent.disableClickPropagation(layerToggle);
+  L.DomEvent.disableScrollPropagation(layerToggle);
+
+  let baseLayer = 'ortho';
+  function updateAttrib() {
+    let text = ATTRIB[baseLayer];
+    if (katasterOn) text += ' · ' + ATTRIB.kataster;
+    document.getElementById('attrib').textContent = text;
+  }
+
+  function setLayer(which) {
+    baseLayer = which;
+    layerToggle.querySelectorAll('button').forEach(function (b) {
+      b.classList.toggle('seg-active', b.dataset.layer === which);
+      b.classList.toggle('text-mist/70', b.dataset.layer !== which);
+    });
+    if (which === 'ortho') { map.removeLayer(osm); ortho.addTo(map); }
+    else { map.removeLayer(ortho); osm.addTo(map); }
+    if (katasterOn) kataster.bringToFront();
+    updateAttrib();
+  }
+  layerToggle.addEventListener('click', function (e) {
+    const btn = e.target.closest('button[data-layer]');
+    if (!btn) return;
+    setLayer(btn.dataset.layer);
+  });
+  setLayer('ortho');
+
+  /* ---------------- Kataster-Schieberegler ---------------- */
+  const katasterSwitch = document.getElementById('kataster-switch');
+  L.DomEvent.disableClickPropagation(katasterSwitch);
+  L.DomEvent.disableScrollPropagation(katasterSwitch);
+
+  function setKataster(on) {
+    katasterOn = on;
+    katasterSwitch.setAttribute('aria-checked', String(on));
+    if (on) kataster.addTo(map); else map.removeLayer(kataster);
+    updateAttrib();
+  }
+  katasterSwitch.addEventListener('click', function () {
+    setKataster(!katasterOn);
+  });
+
+  /* ---------------- Standort ---------------- */
+  const locateSwitch = document.getElementById('locate-switch');
+  L.DomEvent.disableClickPropagation(locateSwitch);
+  L.DomEvent.disableScrollPropagation(locateSwitch);
+
+  let watchId = null;
+  let locateCircle = null;
+  let locateMarker = null;
+
+  function onLocate(pos) {
+    const latlng = L.latLng(pos.coords.latitude, pos.coords.longitude);
+    const acc = pos.coords.accuracy;
+
+    if (!locateCircle) {
+      locateCircle = L.circle(latlng, {
+        radius: acc, color: LOCATE_COLOR, weight: 1.5,
+        fillColor: LOCATE_COLOR, fillOpacity: 0.15,
+      }).addTo(map);
+    } else {
+      locateCircle.setLatLng(latlng);
+      locateCircle.setRadius(acc);
+    }
+
+    if (!locateMarker) {
+      locateMarker = L.circleMarker(latlng, {
+        radius: 7, color: '#fff', weight: 2,
+        fillColor: LOCATE_COLOR, fillOpacity: 1,
+      }).addTo(map);
+      locateMarker.bindTooltip('', { permanent: true, direction: 'top', offset: [0, -8], className: 'locate-tooltip' });
+    } else {
+      locateMarker.setLatLng(latlng);
+    }
+    locateMarker.setTooltipContent('± ' + Math.round(acc) + ' m');
+  }
+
+  function onLocateError() {
+    showToast('Standort nicht verfügbar');
+    setLocate(false);
+  }
+
+  function setLocate(on) {
+    locateSwitch.setAttribute('aria-checked', String(on));
+    if (on) {
+      if (!navigator.geolocation) {
+        showToast('Standort wird nicht unterstützt');
+        locateSwitch.setAttribute('aria-checked', 'false');
+        return;
+      }
+      showToast('Standort wird ermittelt …');
+      watchId = navigator.geolocation.watchPosition(onLocate, onLocateError, {
+        enableHighAccuracy: true, maximumAge: 2000, timeout: 15000,
+      });
+    } else {
+      if (watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
+      if (locateCircle) { map.removeLayer(locateCircle); locateCircle = null; }
+      if (locateMarker) { map.removeLayer(locateMarker); locateMarker = null; }
+    }
+  }
+  locateSwitch.addEventListener('click', function () {
+    setLocate(locateSwitch.getAttribute('aria-checked') !== 'true');
+  });
+
+  /* ---------------- Katasterinfo ---------------- */
+  const infoSwitch = document.getElementById('info-switch');
+  L.DomEvent.disableClickPropagation(infoSwitch);
+  L.DomEvent.disableScrollPropagation(infoSwitch);
+
+  const parcelCard = document.getElementById('parcel-card');
+  const parcelClose = document.getElementById('parcel-close');
+  const dockEl = document.getElementById('dock');
+  const topbarEl = document.getElementById('topbar');
+
+  let katasterinfoOn = false;
+  let parcelHighlight = null;
+  let infoRequestSeq = 0;    // verwirft veraltete Antworten, falls mehrfach schnell angetippt wird
+  let infoAbort = null;      // bricht eine noch laufende Abfrage ab, wenn eine neue gestartet wird
+
+  function showParcelCard() {
+    // Über dem Bedienfeld andocken, damit die Karte darüber Platz für die Parzelle lässt.
+    parcelCard.style.bottom = (dockEl.getBoundingClientRect().height + 12) + 'px';
+    parcelCard.classList.remove('opacity-0', 'translate-y-4');
+    parcelCard.classList.add('pointer-events-auto');
+  }
+  function hideParcelCard() {
+    parcelCard.classList.add('opacity-0', 'translate-y-4');
+    parcelCard.classList.remove('pointer-events-auto');
+    if (parcelHighlight) { map.removeLayer(parcelHighlight); parcelHighlight = null; }
+  }
+  parcelClose.addEventListener('click', hideParcelCard);
+
+  function setKatasterinfo(on) {
+    katasterinfoOn = on;
+    infoSwitch.setAttribute('aria-checked', String(on));
+    if (!on) hideParcelCard();
+  }
+  infoSwitch.addEventListener('click', function () {
+    setKatasterinfo(!katasterinfoOn);
+  });
+
+  /* Summe der geodätischen Kantenlängen eines (bereits geschlossenen) Rings
+     aus L.LatLng-Punkten - der letzte Punkt entspricht dem ersten und wird
+     daher nicht extra zurückverbunden. */
+  function ringPerimeterMeters(latlngs) {
+    let d = 0;
+    for (let i = 0; i < latlngs.length - 1; i++) {
+      d += latlngs[i].distanceTo(latlngs[i + 1]);
+    }
+    return d;
+  }
+
+  function outerRingLatLngs(geometry) {
+    const rings = geometry.type === 'Polygon' ? geometry.coordinates
+      : geometry.type === 'MultiPolygon' ? geometry.coordinates[0] : null;
+    if (!rings || !rings[0]) return null;
+    // Koordinaten kommen von GeoServer in der Abfrage-CRS (EPSG:3857, Meter) zurück,
+    // nicht - wie der GeoJSON-Standard es vorschreibt - in WGS84. Daher hier explizit
+    // zurückprojizieren; ein Vorgängerversuch (Katasterfang) hatte genau das übersehen.
+    return rings[0].map(function (xy) {
+      return L.CRS.EPSG3857.unproject(L.point(xy[0], xy[1]));
+    });
+  }
+
+  const INFO_TIMEOUT_MS = 8000;
+
+  async function queryParcel(latlng) {
+    const seq = ++infoRequestSeq;
+    if (infoAbort) infoAbort.abort(); // vorherige, noch offene Abfrage nicht weiter warten lassen
+    const controller = new AbortController();
+    infoAbort = controller;
+    const timeout = setTimeout(function () { controller.abort(); }, INFO_TIMEOUT_MS);
+
+    try {
+      const size = map.getSize();
+      const bounds = map.getBounds();
+      const sw = L.CRS.EPSG3857.project(bounds.getSouthWest());
+      const ne = L.CRS.EPSG3857.project(bounds.getNorthEast());
+      const pt = map.latLngToContainerPoint(latlng);
+      const params = new URLSearchParams({
+        SERVICE: 'WMS', VERSION: '1.3.0', REQUEST: 'GetFeatureInfo',
+        LAYERS: INFO_LAYER, QUERY_LAYERS: INFO_LAYER, STYLES: '',
+        CRS: 'EPSG:3857', BBOX: [sw.x, sw.y, ne.x, ne.y].join(','),
+        WIDTH: Math.round(size.x), HEIGHT: Math.round(size.y),
+        I: Math.round(pt.x), J: Math.round(pt.y),
+        INFO_FORMAT: 'application/json', FEATURE_COUNT: 1,
+      });
+
+      const res = await fetch(CADASTRE_URL + '?' + params.toString(), { signal: controller.signal });
+      clearTimeout(timeout);
+      if (!res.ok) throw new Error('http ' + res.status);
+      const data = await res.json();
+      if (seq !== infoRequestSeq) return; // eine neuere Abfrage ist schon unterwegs
+
+      if (!data.features || !data.features.length) {
+        showToast('Keine Parzelle an dieser Stelle');
+        return;
+      }
+
+      const f = data.features[0];
+      const p = f.properties || {};
+      const nummer = p.PART_DENOMINATORE ? p.PART_NUMERATORE + '/' + p.PART_DENOMINATORE : p.PART_NUMERATORE;
+
+      document.getElementById('parcel-number').textContent = nummer != null ? nummer : '–';
+      document.getElementById('parcel-kg').textContent = p.PART_CCAT_NOME_DE || p.PART_CCAT_NOME_IT || '–';
+
+      if (typeof p.PART_AREA_TOTALE === 'number') {
+        const fmt = formatArea(p.PART_AREA_TOTALE);
+        document.getElementById('parcel-area').textContent = fmt.main + (fmt.sub ? ' (' + fmt.sub + ')' : '');
+      } else {
+        document.getElementById('parcel-area').textContent = '–';
+      }
+
+      if (parcelHighlight) { map.removeLayer(parcelHighlight); parcelHighlight = null; }
+      const ring = f.geometry && outerRingLatLngs(f.geometry);
+      if (ring) {
+        parcelHighlight = L.polygon(ring, {
+          color: SELECT_COLOR, weight: 2.5, opacity: 0.95,
+          fillColor: SELECT_COLOR, fillOpacity: 0.22,
+        }).addTo(map);
+        document.getElementById('parcel-perimeter').textContent =
+          Math.round(ringPerimeterMeters(ring)).toLocaleString('de-DE') + ' m';
+      } else {
+        document.getElementById('parcel-perimeter').textContent = '–';
+      }
+
+      showParcelCard();
+
+      // Erst NACH dem Einblenden zoomen: die Karte braucht ihre endgültige
+      // Höhe, um den unteren Platzbedarf korrekt aus dem Layout zu lesen.
+      if (ring) {
+        const cardTop = topbarEl.getBoundingClientRect().height + 16;
+        const cardBottom = parcelCard.getBoundingClientRect().height + dockEl.getBoundingClientRect().height + 28;
+        map.flyToBounds(L.latLngBounds(ring), {
+          paddingTopLeft: [24, cardTop],
+          paddingBottomRight: [24, cardBottom],
+          maxZoom: 19,
+          duration: 0.6,
+        });
+      }
+    } catch (err) {
+      clearTimeout(timeout);
+      if (err && err.name === 'AbortError') {
+        // Nur melden, wenn WIR abgebrochen haben (Timeout) - nicht wenn eine
+        // neuere Abfrage diese hier bereits abgelöst hat (seq wäre dann veraltet).
+        if (seq === infoRequestSeq) showToast('Katasterinfo antwortet nicht (Zeitüberschreitung)');
+        return;
+      }
+      if (location.protocol === 'file:') {
+        showToast('Katasterinfo benötigt einen Webserver (http/https) - als lokale Datei blockiert der Dienst den Zugriff');
+      } else {
+        showToast('Katasterinfo nicht erreichbar');
+      }
+    }
+  }
+
+  map.on('click', function (e) {
+    if (!katasterinfoOn) return;
+    queryParcel(e.latlng);
+  });
+
+  /* ---------------- Toast ---------------- */
+  let toastTimer = null;
+  function showToast(msg) {
+    const el = document.getElementById('toast');
+    el.firstElementChild.textContent = msg;
+    el.style.pointerEvents = 'none';
+    el.classList.remove('opacity-0', 'translate-y-[-8px]');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () {
+      el.classList.add('opacity-0', 'translate-y-[-8px]');
+    }, 2200);
+  }
+
+  /* ---------------- Measurement state ---------------- */
+  let points = [];      // L.LatLng[]
+  let markers = [];      // L.Marker[]
+  let polyline = null;
+  let polygon = null;
+  let locked = false;    // true once area computed – reset required to continue
+
+  const btnPoint = document.getElementById('btn-point');
+  const btnArea  = document.getElementById('btn-area');
+  const btnReset = document.getElementById('btn-reset');
+  const resultCard = document.getElementById('result-card');
+
+  function pointIcon(n) {
+    return L.divIcon({
+      className: 'pt-marker',
+      html: '<div style="width:22px;height:22px;border-radius:9999px;background:#4c8a71;color:#0c1210;' +
+            'display:flex;align-items:center;justify-content:center;font:600 11px \'IBM Plex Mono\',monospace;' +
+            'box-shadow:0 0 0 2px rgba(12,18,16,.55),0 2px 6px rgba(0,0,0,.4);">' + n + '</div>',
+      // Trefferfläche (36px) grösser als der sichtbare Punkt (22px) - komfortabler
+      // Ziel für den langen Druck auf dem Handy, ohne die Optik zu vergrössern.
+      iconSize: [36, 36],
+      iconAnchor: [18, 18],
+    });
+  }
+
+  function updateAreaButtonState() {
+    if (locked) return;
+    const enabled = points.length >= 3;
+    btnArea.disabled = !enabled;
+  }
+
+  const LONG_PRESS_MS = 500;
+  const MOVE_CANCEL_PX = 8;
+
+  /* Punkt erst nach längerem, ortsfestem Drücken verschiebbar machen - so
+     bleibt ein kurzes Antippen/Wischen an der gleichen Stelle weiterhin ein
+     normales Kartenschwenken (kein versehentliches Verziehen). */
+  function enableLongPressDrag(marker, index) {
+    const el = marker.getElement();
+    let pressTimer = null;
+    let startX = 0, startY = 0;
+    let dragging = false;
+
+    function clearPress() {
+      clearTimeout(pressTimer);
+      pressTimer = null;
+    }
+
+    function onMove(e) {
+      if (!dragging) {
+        const dx = e.clientX - startX, dy = e.clientY - startY;
+        if (pressTimer && Math.hypot(dx, dy) > MOVE_CANCEL_PX) clearPress();
+        return;
+      }
+      e.preventDefault();
+      const latlng = map.mouseEventToLatLng(e);
+      points[index] = latlng;
+      marker.setLatLng(latlng);
+      refreshShape();
+    }
+
+    function endPress() {
+      clearPress();
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', endPress);
+      document.removeEventListener('pointercancel', endPress);
+      if (dragging) {
+        dragging = false;
+        map.dragging.enable();
+        el.classList.remove('pt-dragging');
+      }
+    }
+
+    el.addEventListener('pointerdown', function (e) {
+      if (e.button !== undefined && e.button !== 0) return;
+      startX = e.clientX; startY = e.clientY;
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', endPress);
+      document.addEventListener('pointercancel', endPress);
+      pressTimer = setTimeout(function () {
+        pressTimer = null;
+        dragging = true;
+        map.dragging.disable();
+        el.classList.add('pt-dragging');
+        if (navigator.vibrate) navigator.vibrate(15);
+      }, LONG_PRESS_MS);
+    });
+  }
+
+  function addPoint() {
+    if (locked) return;
+    const c = map.getCenter();
+    const index = points.length;
+    points.push(c);
+    const marker = L.marker(c, { icon: pointIcon(index + 1) }).addTo(map);
+    markers.push(marker);
+    enableLongPressDrag(marker, index);
+
+    if (points.length > 1) {
+      if (!polyline) {
+        polyline = L.polyline(points, { color: '#4c8a71', weight: 2.5, opacity: 0.9 }).addTo(map);
+      } else {
+        polyline.setLatLngs(points);
+      }
+    }
+    updateAreaButtonState();
+  }
+
+  /* Geodätische Polygonfläche – Kugelnäherung (Erdradius WGS84 6378137 m).
+     Prinzip nach Leaflet.GeometryUtil.geodesicArea. */
+  function geodesicArea(latlngs) {
+    const R = 6378137.0;
+    const d2r = Math.PI / 180;
+    let area = 0;
+    const n = latlngs.length;
+    for (let i = 0; i < n; i++) {
+      const p1 = latlngs[i];
+      const p2 = latlngs[(i + 1) % n];
+      area += (p2.lng - p1.lng) * d2r * (2 + Math.sin(p1.lat * d2r) + Math.sin(p2.lat * d2r));
+    }
+    return Math.abs(area * R * R / 2);
+  }
+
+  function perimeter(latlngs) {
+    let d = 0;
+    for (let i = 0; i < latlngs.length; i++) {
+      d += latlngs[i].distanceTo(latlngs[(i + 1) % latlngs.length]);
+    }
+    return d;
+  }
+
+  function formatArea(m2) {
+    if (m2 >= 10000) {
+      const ha = m2 / 10000;
+      return {
+        main: ha.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ha',
+        sub: Math.round(m2).toLocaleString('de-DE') + ' m²',
+      };
+    }
+    return {
+      main: Math.round(m2).toLocaleString('de-DE') + ' m²',
+      sub: '',
+    };
+  }
+
+  /* Aktualisiert die Ergebnis-Karte anhand des aktuellen `points`-Arrays.
+     Wird sowohl beim Berechnen als auch live beim Verschieben eines
+     bereits berechneten Punktes aufgerufen. */
+  function renderResult() {
+    const area = geodesicArea(points);
+    const per = perimeter(points);
+    const fmt = formatArea(area);
+    document.getElementById('area-main').textContent = fmt.main;
+    document.getElementById('area-sub').textContent = fmt.sub;
+    document.getElementById('area-meta').textContent =
+      points.length + ' Punkte · Umfang ' + Math.round(per).toLocaleString('de-DE') + ' m';
+  }
+
+  /* Zeichnet Linie/Polygon anhand des aktuellen `points`-Arrays neu -
+     wird nach jeder Verschiebung eines Punktes aufgerufen. */
+  function refreshShape() {
+    if (polygon) {
+      polygon.setLatLngs(points);
+      renderResult();
+    } else if (polyline) {
+      polyline.setLatLngs(points);
+    }
+  }
+
+  function calculateArea() {
+    if (points.length < 3) {
+      showToast('Mindestens 3 Punkte nötig');
+      return;
+    }
+    if (polyline) { map.removeLayer(polyline); polyline = null; }
+    polygon = L.polygon(points, {
+      color: '#4c8a71', weight: 2.5, opacity: 0.95,
+      fillColor: '#4c8a71', fillOpacity: 0.32,
+    }).addTo(map);
+
+    renderResult();
+
+    resultCard.classList.remove('opacity-0', 'translate-y-4');
+    resultCard.classList.add('pointer-events-auto');
+
+    locked = true;
+    btnPoint.disabled = true;
+    btnArea.disabled = true;
+  }
+
+  function resetAll() {
+    markers.forEach(function (m) { map.removeLayer(m); });
+    if (polyline) map.removeLayer(polyline);
+    if (polygon) map.removeLayer(polygon);
+    points = []; markers = []; polyline = null; polygon = null;
+    locked = false;
+    btnPoint.disabled = false;
+    btnArea.disabled = true;
+    resultCard.classList.add('opacity-0', 'translate-y-4');
+    resultCard.classList.remove('pointer-events-auto');
+  }
+
+  btnPoint.addEventListener('click', addPoint);
+  btnArea.addEventListener('click', calculateArea);
+  btnReset.addEventListener('click', resetAll);
+})();
+</script>
+</body>
+</html>
