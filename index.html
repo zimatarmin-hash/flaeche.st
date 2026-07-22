@@ -1,6 +1,16 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
+  <!-- Link zur Manifest-Datei -->
+<link rel="manifest" href="manifest.json">
+
+<!-- iOS-spezifische Einstellungen -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="FlächenST">
+
+<!-- App-Icon für iPhone & iPad -->
+<link rel="apple-touch-icon" href="icon-512.png">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Flächenmessung Südtirol</title>
@@ -286,6 +296,8 @@
         </button>
       </div>
     </div>
+
+    <div id="visit-counter" class="text-[10px] text-mist/40 font-body tabular-nums text-center pt-2 mt-1 border-t border-mist/10"></div>
   </div>
 </div>
 
@@ -1141,6 +1153,46 @@
   btnPoint.addEventListener('click', addPoint);
   btnArea.addEventListener('click', calculateArea);
   btnReset.addEventListener('click', resetAll);
+
+  /* ---------------- Aufruf-Zähler ----------------
+     Zwei unabhängige, kostenlose Zählerdienste ohne eigenes Backend (beide
+     erhöhen bei jedem Aufruf einen serverseitigen Zähler, CORS geprüft offen).
+     Manche Tracking-/Werbeblocker stufen Domains mit "Zähler"-Funktion pauschal
+     als Tracker ein und blockieren die Anfrage lautlos (fetch schlägt dann
+     fehl, ohne dass die Seite selbst etwas falsch macht) - deshalb zwei
+     unterschiedliche Anbieter/Domains als Fallback-Kette, damit die Anzeige
+     nicht allein am Blocklisten-Zufall eines einzelnen Dienstes hängt. */
+  (function () {
+    const NAMESPACE = 'flaechenmessung-suedtirol-armins';
+    const KEY = 'aufrufe';
+    const el = document.getElementById('visit-counter');
+
+    function show(n) {
+      el.textContent = n.toLocaleString('de-DE') + ' Aufrufe insgesamt';
+    }
+
+    function viaAbacus() {
+      return fetch('https://abacus.jasoncameron.dev/hit/' + NAMESPACE + '/' + KEY)
+        .then(function (res) { return res.ok ? res.json() : Promise.reject(); })
+        .then(function (data) {
+          if (typeof data.value !== 'number') throw new Error('unexpected response');
+          return data.value;
+        });
+    }
+
+    function viaCounterApi() {
+      return fetch('https://api.counterapi.dev/v1/' + NAMESPACE + '/' + KEY + '/up')
+        .then(function (res) { return res.ok ? res.json() : Promise.reject(); })
+        .then(function (data) {
+          if (typeof data.count !== 'number') throw new Error('unexpected response');
+          return data.count;
+        });
+    }
+
+    viaAbacus().catch(viaCounterApi).then(show).catch(function () {
+      /* Beide Dienste nicht erreichbar/blockiert - Zeile bleibt leer, kein harter Fehler. */
+    });
+  })();
 
   if (window.lucide) lucide.createIcons();
 })();
