@@ -240,21 +240,38 @@
           <span class="switch-track"><span class="switch-thumb"></span></span>
         </button>
       </div>
-      <div class="flex items-center justify-between gap-2 px-1">
-        <span class="font-display text-sm font-semibold tracking-wide text-mist/85">Gefahrenzonen</span>
-        <button id="hazard-switch" type="button" role="switch" aria-checked="false" class="switch-hit" aria-label="Gefahrenzonenplan einblenden">
-          <span class="switch-track"><span class="switch-thumb"></span></span>
-        </button>
+      <div>
+        <div class="flex items-center justify-between gap-2 px-1">
+          <span class="font-display text-sm font-semibold tracking-wide text-mist/85">Gefahrenzonen</span>
+          <button id="hazard-switch" type="button" role="switch" aria-checked="false" class="switch-hit" aria-label="Gefahrenzonenplan einblenden">
+            <span class="switch-track"><span class="switch-thumb"></span></span>
+          </button>
+        </div>
+        <!-- Untermenü: klappt nur auf, solange der Hauptschalter "Gefahrenzonen" an ist -->
+        <div id="hazard-submenu" class="hidden pl-3 border-l-2 border-pine/30 ml-1 mt-1 flex flex-col divide-y divide-mist/10">
+          <div class="flex items-center justify-between gap-2 px-1 py-1.5">
+            <span class="font-body text-sm text-mist/75">Wassergefahren</span>
+            <button id="hazard-sub-hydrology" type="button" role="switch" aria-checked="true" class="switch-hit" aria-label="Wassergefahren einblenden">
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+            </button>
+          </div>
+          <div class="flex items-center justify-between gap-2 px-1 py-1.5">
+            <span class="font-body text-sm text-mist/75">Lawinen</span>
+            <button id="hazard-sub-avalanches" type="button" role="switch" aria-checked="true" class="switch-hit" aria-label="Lawinen einblenden">
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+            </button>
+          </div>
+          <div class="flex items-center justify-between gap-2 px-1 py-1.5">
+            <span class="font-body text-sm text-mist/75">Massenbewegungen</span>
+            <button id="hazard-sub-landslides" type="button" role="switch" aria-checked="true" class="switch-hit" aria-label="Massenbewegungen einblenden">
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+            </button>
+          </div>
+        </div>
       </div>
       <div class="flex items-center justify-between gap-2 px-1">
         <span class="font-display text-sm font-semibold tracking-wide text-mist/85">Bauleitplan <span class="text-mist/40 text-xs">/GProRL</span></span>
         <button id="zoning-switch" type="button" role="switch" aria-checked="false" class="switch-hit" aria-label="Bauleitplan / Gemeindeentwicklungsprogramm einblenden">
-          <span class="switch-track"><span class="switch-thumb"></span></span>
-        </button>
-      </div>
-      <div class="flex items-center justify-between gap-2 px-1">
-        <span class="font-display text-sm font-semibold tracking-wide text-mist/85">Land- u. Forstwirtschaft</span>
-        <button id="agri-switch" type="button" role="switch" aria-checked="false" class="switch-hit" aria-label="Landwirtschaft, Forstwirtschaft, Trachtpflanzen und Jagen/Fischen einblenden">
           <span class="switch-track"><span class="switch-thumb"></span></span>
         </button>
       </div>
@@ -347,26 +364,23 @@
   const INFO_LAYER = 'ParcelsAggregate'; // Sachdaten (Nummer, Katastralgemeinde, Fläche) per GetFeatureInfo
 
   /* Raumordnung: Gefahrenzonenplan + Bauleitplan (Amt für Landesplanung / Geologie).
-     Alle Layer-Namen wurden per echter GetCapabilities-/GetMap-Abfrage geprüft. */
+     Alle Layer-Namen wurden per echter GetCapabilities-/GetMap-Abfrage geprüft.
+     Geologische Risikozonen und die Deckung des Gefahrenzonenplans werden
+     bewusst nicht eingebunden - nur die drei angeforderten Gefahrenarten. */
   const TERRITORIAL_URL = 'https://geoservices1.civis.bz.it/geoserver/p_bz-TerritorialPlans/ows';
-  const HAZARD_LAYER = 'UrbanPlan-HazardZonePlan';   // Gefahrenzonenplan (Geologie/Lawinen/Wasser/Massenbewegung, zusammengefasst)
   const ZONING_LAYER = 'UrbanPlan-ZoningPlan';        // Bauleitplan/Zonierung - siehe Hinweis unten
-  const AGRI_ZONING_LAYER = 'LandscapePlan-Zoning';   // Landschaftsplan-Zonierung (AP2/AF2/AA7 etc. - die Codes aus dem Referenzbild)
-
-  /* Land- und Forstwirtschaft: entspricht dem gleichnamigen Reiter im echten
-     GeoBrowser mit den vier Unterpunkten Landwirtschaft/Forstwirtschaft/
-     Trachtpflanzen/Jagen und Fischen - alle vier werden zusammen eingeblendet. */
-  const FORESTRY_URL = 'https://geoservices6.civis.bz.it/geoserver/p_bz-Forestry/ows';
-  const FOREST_TYPES_LAYER = 'ForestTypes';           // Forstwirtschaft (Waldtypen)
-  const NECTAR_LAYER = 'NectariferousAreas';          // Trachtpflanzen
-  const HUNTING_FISHING_LAYER = 'HuntingAndFishing';  // Jagen und Fischen
+  const HAZARD_SUB_LAYERS = {
+    hydrology:  { name: 'UrbanPlan-HazardZonePlan-Hydrology',  label: 'Wassergefahren' },
+    avalanches: { name: 'UrbanPlan-HazardZonePlan-Avalanches', label: 'Lawinen' },
+    landslides: { name: 'UrbanPlan-HazardZonePlan-Landslides', label: 'Massenbewegungen' },
+  };
 
   const LOCATE_COLOR = '#4a90c4';
   const SELECT_COLOR = '#d9a441';
 
-  /* Von den drei "inhaltlichen" Overlays darf laut Vorgabe immer nur eines
+  /* Von den beiden "inhaltlichen" Overlays darf laut Vorgabe immer nur eines
      gleichzeitig aktiv sein (Kataster steht davon unabhängig). */
-  const EXCLUSIVE_OVERLAYS = ['hazard', 'zoning', 'agri'];
+  const EXCLUSIVE_OVERLAYS = ['hazard', 'zoning'];
 
   const map = L.map('map', {
     center: [46.7, 11.43],
@@ -394,7 +408,7 @@
     setLayer('osm');
   });
 
-  /* ---------------- Overlays (Kataster, Gefahrenzonen, Bauleitplan, Landwirtschaft) ---------------- */
+  /* ---------------- Overlays (Kataster, Gefahrenzonen, Bauleitplan) ---------------- */
   function legendUrl(baseUrl, layerName) {
     // fontSize/WIDTH/HEIGHT sorgen für spürbar größere, saubere Schrift direkt
     // vom Server gerendert - besser lesbar auf dem Handy als ein hochskaliertes,
@@ -407,57 +421,40 @@
     layers: CADASTRE_LAYER, format: 'image/png', transparent: true,
     version: '1.3.0', maxZoom: 20, maxNativeZoom: 19, opacity: 0.9,
   });
-  const hazard = L.tileLayer.wms(TERRITORIAL_URL, {
-    layers: HAZARD_LAYER, format: 'image/png', transparent: true,
-    version: '1.3.0', maxZoom: 20, maxNativeZoom: 19, opacity: 0.55,
-  });
   const zoning = L.tileLayer.wms(TERRITORIAL_URL, {
     layers: ZONING_LAYER, format: 'image/png', transparent: true,
     version: '1.3.0', maxZoom: 20, maxNativeZoom: 19, opacity: 0.6,
   });
-  /* "Land- und Forstwirtschaft" fasst wie im echten GeoBrowser vier
-     Unterebenen zu einer Gruppe zusammen: Landwirtschaft (Zonierung),
-     Forstwirtschaft (Waldtypen), Trachtpflanzen und Jagen und Fischen. */
-  const agriLandwirtschaft = L.tileLayer.wms(TERRITORIAL_URL, {
-    layers: AGRI_ZONING_LAYER, format: 'image/png', transparent: true,
-    version: '1.3.0', maxZoom: 20, maxNativeZoom: 19, opacity: 0.55,
+
+  /* Gefahrenzonen bestehen aus drei einzeln schaltbaren Gefahrenarten statt
+     einem einzigen Gruppen-Layer - Geologie und "Deckung" werden bewusst
+     nicht eingebunden. */
+  const hazardLayers = {};
+  Object.keys(HAZARD_SUB_LAYERS).forEach(function (key) {
+    hazardLayers[key] = L.tileLayer.wms(TERRITORIAL_URL, {
+      layers: HAZARD_SUB_LAYERS[key].name, format: 'image/png', transparent: true,
+      version: '1.3.0', maxZoom: 20, maxNativeZoom: 19, opacity: 0.55,
+    });
   });
-  const agriForstwirtschaft = L.tileLayer.wms(FORESTRY_URL, {
-    layers: FOREST_TYPES_LAYER, format: 'image/png', transparent: true,
-    version: '1.3.0', maxZoom: 20, maxNativeZoom: 19, opacity: 0.55,
-  });
-  const agriTrachtpflanzen = L.tileLayer.wms(FORESTRY_URL, {
-    layers: NECTAR_LAYER, format: 'image/png', transparent: true,
-    version: '1.3.0', maxZoom: 20, maxNativeZoom: 19, opacity: 0.55,
-  });
-  const agriJagenFischen = L.tileLayer.wms(FORESTRY_URL, {
-    layers: HUNTING_FISHING_LAYER, format: 'image/png', transparent: true,
-    version: '1.3.0', maxZoom: 20, maxNativeZoom: 19, opacity: 0.55,
-  });
-  const agriculture = L.layerGroup([agriLandwirtschaft, agriForstwirtschaft, agriTrachtpflanzen, agriJagenFischen]);
+  // Voreinstellung: sind alle drei Gefahrenarten an, sobald der Hauptschalter
+  // "Gefahrenzonen" das erste Mal eingeschaltet wird.
+  const hazardSubOn = { hydrology: true, avalanches: true, landslides: true };
 
   const OVERLAYS = {
     kataster: { mapLayer: kataster, tileLayers: [kataster], on: false, failed: false, label: 'Kataster',
       attrib: 'Kataster © Amt für Vermessung und Grundbuch – Südtirol',
       legend: null },
-    hazard:   { mapLayer: hazard, tileLayers: [hazard], on: false, failed: false, label: 'Gefahrenzonen',
+    hazard:   { mapLayer: null, tileLayers: Object.keys(hazardLayers).map(function (k) { return hazardLayers[k]; }),
+      on: false, failed: false, label: 'Gefahrenzonen',
       attrib: 'Gefahrenzonenplan © Autonome Provinz Bozen – Südtirol',
-      legend: [{ title: 'Gefahrenzonen', url: legendUrl(TERRITORIAL_URL, HAZARD_LAYER) }] },
+      legend: null }, // Legende für Gefahrenzonen wird dynamisch aus den aktiven Unterebenen gebaut, s. updateLegend()
     zoning:   { mapLayer: zoning, tileLayers: [zoning], on: false, failed: false, label: 'Bauleitplan',
       attrib: 'Bauleitplan © Autonome Provinz Bozen – Südtirol',
       legend: [{ title: 'Bauleitplan', url: legendUrl(TERRITORIAL_URL, ZONING_LAYER) }] },
-    agri:     { mapLayer: agriculture, tileLayers: [agriLandwirtschaft, agriForstwirtschaft, agriTrachtpflanzen, agriJagenFischen],
-      on: false, failed: false, label: 'Land- u. Forstwirtschaft',
-      attrib: 'Land- und Forstwirtschaft © Autonome Provinz Bozen – Südtirol',
-      legend: [
-        { title: 'Landwirtschaft', url: legendUrl(TERRITORIAL_URL, AGRI_ZONING_LAYER) },
-        { title: 'Forstwirtschaft', url: legendUrl(FORESTRY_URL, FOREST_TYPES_LAYER) },
-        { title: 'Trachtpflanzen', url: legendUrl(FORESTRY_URL, NECTAR_LAYER) },
-        { title: 'Jagen und Fischen', url: legendUrl(FORESTRY_URL, HUNTING_FISHING_LAYER) },
-      ] },
   };
 
   Object.keys(OVERLAYS).forEach(function (key) {
+    if (key === 'hazard') return; // Gefahrenzonen behandeln Fehler pro Unterebene, s.u.
     const o = OVERLAYS[key];
     o.tileLayers.forEach(function (tl) {
       tl.on('tileerror', function () {
@@ -467,6 +464,40 @@
         setOverlay(key, false);
       });
     });
+  });
+
+  /* ---------------- Gefahrenzonen: drei einzeln schaltbare Unterebenen ---------------- */
+  const hazardSubFailed = { hydrology: false, avalanches: false, landslides: false };
+
+  function applyHazardSub(key, on) {
+    hazardSubOn[key] = on;
+    document.getElementById('hazard-sub-' + key).setAttribute('aria-checked', String(on));
+    const shouldShow = OVERLAYS.hazard.on && on;
+    if (shouldShow) hazardLayers[key].addTo(map); else map.removeLayer(hazardLayers[key]);
+  }
+
+  /* Blendet das Untermenü ein/aus und gleicht die tatsächlich sichtbaren
+     Layer mit Hauptschalter × Einzelschalter ab. Wird nach jeder Änderung
+     an "hazard" selbst aufgerufen. */
+  function syncHazardVisibility() {
+    document.getElementById('hazard-submenu').classList.toggle('hidden', !OVERLAYS.hazard.on);
+    Object.keys(hazardLayers).forEach(function (key) {
+      const shouldShow = OVERLAYS.hazard.on && hazardSubOn[key];
+      if (shouldShow) hazardLayers[key].addTo(map); else map.removeLayer(hazardLayers[key]);
+    });
+  }
+
+  Object.keys(hazardLayers).forEach(function (key) {
+    hazardLayers[key].on('tileerror', function () {
+      if (hazardSubFailed[key]) return;
+      hazardSubFailed[key] = true;
+      showToast(HAZARD_SUB_LAYERS[key].label + ' nicht erreichbar');
+      applyHazardSub(key, false);
+    });
+    const el = document.getElementById('hazard-sub-' + key);
+    L.DomEvent.disableClickPropagation(el);
+    L.DomEvent.disableScrollPropagation(el);
+    el.addEventListener('click', function () { applyHazardSub(key, !hazardSubOn[key]); });
   });
 
   const ATTRIB_BASE = {
@@ -536,14 +567,21 @@
     const o = OVERLAYS[activeKey];
     document.getElementById('legend-heading').textContent = o.label;
 
+    // Gefahrenzonen haben keine feste Legende - sie hängt davon ab, welche
+    // der drei Gefahrenarten gerade einzeln eingeschaltet sind.
+    const legendParts = activeKey === 'hazard'
+      ? Object.keys(hazardLayers).filter(function (key) { return hazardSubOn[key]; })
+          .map(function (key) { return { title: HAZARD_SUB_LAYERS[key].label, url: legendUrl(TERRITORIAL_URL, HAZARD_SUB_LAYERS[key].name) }; })
+      : o.legend;
+
     const content = document.getElementById('legend-content');
     content.innerHTML = '';
-    o.legend.forEach(function (part) {
+    legendParts.forEach(function (part) {
       const block = document.createElement('div');
-      // Bei mehreren Teil-Legenden (z.B. Land- u. Forstwirtschaft) bekommt
-      // jeder Teil eine eigene kleine Überschrift; bei nur einer Legende
-      // reicht die Überschrift oben im Panel und wird hier weggelassen.
-      if (o.legend.length > 1) {
+      // Bei mehreren Teil-Legenden bekommt jeder Teil eine eigene kleine
+      // Überschrift; bei nur einer Legende reicht die Überschrift oben im
+      // Panel und wird hier weggelassen.
+      if (legendParts.length > 1) {
         const title = document.createElement('div');
         title.className = 'text-xs uppercase tracking-[0.1em] text-mist/50 font-body font-medium mb-1';
         title.textContent = part.title;
@@ -569,12 +607,18 @@
     const o = OVERLAYS[key];
     o.on = on;
     document.getElementById(key + '-switch').setAttribute('aria-checked', String(on));
-    if (on) o.mapLayer.addTo(map); else map.removeLayer(o.mapLayer);
+    if (key === 'hazard') {
+      syncHazardVisibility(); // eigene Logik: Hauptschalter × drei Einzelschalter
+    } else if (on) {
+      o.mapLayer.addTo(map);
+    } else {
+      map.removeLayer(o.mapLayer);
+    }
   }
 
-  /* Von Gefahrenzonen/Bauleitplan/Landwirtschaft darf immer nur eines aktiv
-     sein - wird eines davon eingeschaltet, schaltet sich ein bereits aktives
-     anderes aus der Gruppe automatisch ab. Kataster bleibt davon unberührt. */
+  /* Von Gefahrenzonen/Bauleitplan darf immer nur eines aktiv sein - wird eines
+     davon eingeschaltet, schaltet sich ein bereits aktives anderes automatisch
+     ab. Kataster bleibt davon unberührt. */
   function setOverlay(key, on) {
     if (on && EXCLUSIVE_OVERLAYS.includes(key)) {
       EXCLUSIVE_OVERLAYS.forEach(function (other) {
@@ -596,7 +640,7 @@
   });
   setLayer('ortho');
 
-  ['kataster', 'hazard', 'zoning', 'agri'].forEach(function (key) {
+  ['kataster', 'hazard', 'zoning'].forEach(function (key) {
     const el = document.getElementById(key + '-switch');
     L.DomEvent.disableClickPropagation(el);
     L.DomEvent.disableScrollPropagation(el);
