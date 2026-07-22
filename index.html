@@ -17,7 +17,7 @@
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&family=Dancing+Script:wght@600;700&display=swap" rel="stylesheet">
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
@@ -156,11 +156,76 @@
 
   ::selection { background: rgba(76,138,113,.4); }
   button:focus-visible, [tabindex]:focus-visible { outline: 2px solid #4c8a71; outline-offset: 2px; }
+
+  /* ---- Startbildschirm ----
+     Grauton und Orange sind bewusst vom Logo abgeleitet, nicht vom sonstigen
+     App-Akzent (Pine-Grün) - der Splash ist ein eigener, kurzer Markenmoment. */
+  :root { --splash-bg: #414d55; --splash-accent: #ee5f24; }
+  #splash {
+    position: fixed; inset: 0; z-index: 900;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 28px;
+    background: var(--splash-bg);
+    transition: opacity .6s ease;
+  }
+  #splash.splash-hide { opacity: 0; pointer-events: none; }
+
+  #splash-logo {
+    width: 132px; height: 132px;
+    animation: splash-pulse 2.6s ease-in-out infinite;
+  }
+  @keyframes splash-pulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.06); opacity: .86; }
+  }
+
+  #splash-bar-track {
+    width: 148px; height: 4px; border-radius: 999px;
+    background: rgba(255,255,255,.14); overflow: hidden;
+  }
+  #splash-bar-fill {
+    height: 100%; width: 36%; border-radius: 999px;
+    background: var(--splash-accent);
+    animation: splash-indeterminate 1.3s ease-in-out infinite;
+  }
+  #splash-bar-fill.splash-done {
+    width: 100%; animation: none; transition: width .35s ease;
+  }
+  @keyframes splash-indeterminate {
+    0% { transform: translateX(-120%); }
+    100% { transform: translateX(310%); }
+  }
+
+  #splash-caption { width: 280px; height: 70px; overflow: visible; }
+  #splash-caption text {
+    font-family: 'Dancing Script', cursive;
+    font-weight: 700;
+    font-size: 27px;
+    fill: var(--splash-accent);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    #splash-logo { animation: none; }
+    #splash-bar-fill { animation: none; width: 60%; }
+    #splash { transition: none; }
+  }
 </style>
 </head>
 <body class="text-mist font-body">
 
 <div id="map"></div>
+
+<!-- Startbildschirm: verschwindet, sobald das Luftbild im Hintergrund geladen ist -->
+<div id="splash">
+  <img id="splash-logo" src="icon-512.png" alt="FLÄCHE.ST" />
+  <div id="splash-bar-track"><div id="splash-bar-fill"></div></div>
+  <svg id="splash-caption" viewBox="0 0 280 70" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <path id="splash-arc" d="M 10 55 Q 140 10 270 55" fill="none" />
+    <text text-anchor="middle">
+      <textPath href="#splash-arc" xlink:href="#splash-arc" startOffset="50%">Geobrowser made easy by Armin</textPath>
+    </text>
+  </svg>
+</div>
 
 <!-- Reticle -->
 <div id="reticle">
@@ -419,6 +484,17 @@
     showToast('Luftbild nicht erreichbar – wechsle zu Karte');
     setLayer('osm');
   });
+
+  /* ---------------- Startbildschirm ausblenden, sobald die Karte geladen ist ---------------- */
+  function hideSplash() {
+    const splash = document.getElementById('splash');
+    if (!splash || splash.classList.contains('splash-hide')) return;
+    document.getElementById('splash-bar-fill').classList.add('splash-done');
+    setTimeout(function () { splash.classList.add('splash-hide'); }, 200);
+  }
+  ortho.once('load', hideSplash);
+  osm.once('load', hideSplash); // falls das Luftbild fehlschlägt und auf Karte gewechselt wird
+  setTimeout(hideSplash, 8000); // Sicherheitsnetz - der Splash darf die App nie dauerhaft blockieren
 
   /* ---------------- Overlays (Kataster, Gefahrenzonen, Bauleitplan) ---------------- */
   function legendUrl(baseUrl, layerName) {
