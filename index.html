@@ -17,7 +17,7 @@
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&family=Dancing+Script:wght@600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&family=Chakra+Petch:ital,wght@0,600;0,700;1,600;1,700&display=swap" rel="stylesheet">
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
@@ -206,12 +206,26 @@
     100% { transform: translateX(310%); }
   }
 
-  #splash-caption { width: 280px; height: 70px; overflow: visible; }
-  #splash-caption text {
-    font-family: 'Dancing Script', cursive;
+  /* max-width statt fester Breite + clamp() für die Schriftgröße, damit der
+     Text auf jedem Handy komplett sichtbar bleibt statt abgeschnitten zu werden. */
+  #splash-caption {
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    max-width: min(88vw, 340px);
+    text-align: center;
+    color: var(--splash-accent);
+    font-family: 'Chakra Petch', 'Rajdhani', sans-serif;
+  }
+  #splash-caption .line-1 {
     font-weight: 700;
-    font-size: 27px;
-    fill: var(--splash-accent);
+    font-size: clamp(17px, 5vw, 22px);
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+  #splash-caption .line-2 {
+    font-weight: 600;
+    font-style: italic;
+    font-size: clamp(15px, 4.4vw, 19px);
+    opacity: 0.9;
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -232,12 +246,10 @@
   <div id="splash-content">
     <img id="splash-logo" src="icon-512.png" alt="FLÄCHE.ST" />
     <div id="splash-bar-track"><div id="splash-bar-fill"></div></div>
-    <svg id="splash-caption" viewBox="0 0 280 70" xmlns:xlink="http://www.w3.org/1999/xlink">
-      <path id="splash-arc" d="M 10 55 Q 140 10 270 55" fill="none" />
-      <text text-anchor="middle">
-        <textPath href="#splash-arc" xlink:href="#splash-arc" startOffset="50%">Geobrowser made easy by Armin</textPath>
-      </text>
-    </svg>
+    <div id="splash-caption">
+      <div class="line-1">Geobrowser made easy</div>
+      <div class="line-2">by Armin</div>
+    </div>
   </div>
 </div>
 
@@ -540,7 +552,10 @@
 
   function whenSplashAssetsReady() {
     const fontPromise = (document.fonts && document.fonts.load)
-      ? document.fonts.load("700 27px 'Dancing Script'").catch(function () {}).then(function () { return document.fonts.ready; }).catch(function () {})
+      ? Promise.all([
+          document.fonts.load("700 20px 'Chakra Petch'"),
+          document.fonts.load("italic 600 18px 'Chakra Petch'"),
+        ]).catch(function () {}).then(function () { return document.fonts.ready; }).catch(function () {})
       : Promise.resolve();
     const imgPromise = splashLogoEl.complete
       ? Promise.resolve()
