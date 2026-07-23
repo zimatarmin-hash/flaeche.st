@@ -170,6 +170,16 @@
   }
   #splash.splash-hide { opacity: 0; pointer-events: none; }
 
+  /* Inhalt bleibt unsichtbar, bis Logo-Bild UND Schriftart vollständig geladen
+     sind (s. JS) - so baut sich der Startbildschirm nie sichtbar Stück für
+     Stück auf, sondern erscheint in einem Zug fertig. */
+  #splash-content {
+    display: flex; flex-direction: column; align-items: center; gap: 28px;
+    opacity: 0;
+    transition: opacity .35s ease;
+  }
+  #splash-content.splash-content-visible { opacity: 1; }
+
   #splash-logo {
     width: 132px; height: 132px;
     animation: splash-pulse 2.6s ease-in-out infinite;
@@ -207,7 +217,7 @@
   @media (prefers-reduced-motion: reduce) {
     #splash-logo { animation: none; }
     #splash-bar-fill { animation: none; width: 60%; }
-    #splash { transition: none; }
+    #splash, #splash-content { transition: none; }
   }
 </style>
 </head>
@@ -215,16 +225,20 @@
 
 <div id="map"></div>
 
-<!-- Startbildschirm: verschwindet, sobald das Luftbild im Hintergrund geladen ist -->
+<!-- Startbildschirm: Inhalt bleibt unsichtbar, bis Logo + Schriftart fertig
+     geladen sind, erscheint dann komplett auf einmal, bleibt mind. 2s stehen
+     und blendet erst aus, sobald auch die Karte im Hintergrund geladen ist. -->
 <div id="splash">
-  <img id="splash-logo" src="icon-512.png" alt="FLÄCHE.ST" />
-  <div id="splash-bar-track"><div id="splash-bar-fill"></div></div>
-  <svg id="splash-caption" viewBox="0 0 280 70" xmlns:xlink="http://www.w3.org/1999/xlink">
-    <path id="splash-arc" d="M 10 55 Q 140 10 270 55" fill="none" />
-    <text text-anchor="middle">
-      <textPath href="#splash-arc" xlink:href="#splash-arc" startOffset="50%">Geobrowser made easy by Armin</textPath>
-    </text>
-  </svg>
+  <div id="splash-content">
+    <img id="splash-logo" src="icon-512.png" alt="FLÄCHE.ST" />
+    <div id="splash-bar-track"><div id="splash-bar-fill"></div></div>
+    <svg id="splash-caption" viewBox="0 0 280 70" xmlns:xlink="http://www.w3.org/1999/xlink">
+      <path id="splash-arc" d="M 10 55 Q 140 10 270 55" fill="none" />
+      <text text-anchor="middle">
+        <textPath href="#splash-arc" xlink:href="#splash-arc" startOffset="50%">Geobrowser made easy by Armin</textPath>
+      </text>
+    </svg>
+  </div>
 </div>
 
 <!-- Reticle -->
@@ -485,16 +499,64 @@
     setLayer('osm');
   });
 
-  /* ---------------- Startbildschirm ausblenden, sobald die Karte geladen ist ---------------- */
-  function hideSplash() {
-    const splash = document.getElementById('splash');
-    if (!splash || splash.classList.contains('splash-hide')) return;
+  /* ---------------- Startbildschirm ----------------
+     Ablauf: (1) warten, bis Logo-Bild + Schriftart wirklich fertig geladen
+     sind, dann den Inhalt komplett auf einmal einblenden (kein Stück-für-
+     Stück-Aufbau mehr); (2) ab diesem Moment mindestens 2s stehen lassen;
+     (3) erst ausblenden, wenn zusätzlich auch die Hintergrundkarte geladen
+     ist - je nachdem, was länger dauert. */
+  const SPLASH_MIN_DISPLAY_MS = 2000;
+  const splashEl = document.getElementById('splash');
+  const splashContentEl = document.getElementById('splash-content');
+  const splashLogoEl = document.getElementById('splash-logo');
+
+  let splashContentRevealedAt = null;
+  let splashMapReady = false;
+
+  function finishSplash() {
+    if (!splashEl || splashEl.classList.contains('splash-hide')) return;
     document.getElementById('splash-bar-fill').classList.add('splash-done');
-    setTimeout(function () { splash.classList.add('splash-hide'); }, 200);
+    setTimeout(function () { splashEl.classList.add('splash-hide'); }, 200);
   }
-  ortho.once('load', hideSplash);
-  osm.once('load', hideSplash); // falls das Luftbild fehlschlägt und auf Karte gewechselt wird
-  setTimeout(hideSplash, 8000); // Sicherheitsnetz - der Splash darf die App nie dauerhaft blockieren
+
+  function maybeFinishSplash() {
+    if (!splashMapReady || splashContentRevealedAt === null) return;
+    const remaining = SPLASH_MIN_DISPLAY_MS - (Date.now() - splashContentRevealedAt);
+    setTimeout(finishSplash, Math.max(0, remaining));
+  }
+
+  function revealSplashContent() {
+    if (splashContentRevealedAt !== null) return;
+    splashContentEl.classList.add('splash-content-visible');
+    splashContentRevealedAt = Date.now();
+    maybeFinishSplash();
+  }
+
+  function onSplashMapLoaded() {
+    if (splashMapReady) return;
+    splashMapReady = true;
+    maybeFinishSplash();
+  }
+
+  function whenSplashAssetsReady() {
+    const fontPromise = (document.fonts && document.fonts.load)
+      ? document.fonts.load("700 27px 'Dancing Script'").catch(function () {}).then(function () { return document.fonts.ready; }).catch(function () {})
+      : Promise.resolve();
+    const imgPromise = splashLogoEl.complete
+      ? Promise.resolve()
+      : new Promise(function (resolve) {
+          splashLogoEl.addEventListener('load', resolve, { once: true });
+          splashLogoEl.addEventListener('error', resolve, { once: true });
+        });
+    return Promise.all([fontPromise, imgPromise]);
+  }
+
+  whenSplashAssetsReady().then(revealSplashContent);
+  setTimeout(revealSplashContent, 4000); // Sicherheitsnetz, falls Font/Bild nie "ready" melden
+
+  ortho.once('load', onSplashMapLoaded);
+  osm.once('load', onSplashMapLoaded); // falls das Luftbild fehlschlägt und auf Karte gewechselt wird
+  setTimeout(onSplashMapLoaded, 8000); // Sicherheitsnetz - der Splash darf die App nie dauerhaft blockieren
 
   /* ---------------- Overlays (Kataster, Gefahrenzonen, Bauleitplan) ---------------- */
   function legendUrl(baseUrl, layerName) {
